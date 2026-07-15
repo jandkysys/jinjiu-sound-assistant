@@ -1,0 +1,32 @@
+kind = "web"
+  previewPath = "/sound-assistant/"
+  title = "金玖音效助手"
+  version = "1.0.0"
+  id = "artifacts/sound-assistant"
+  router = "path"
+
+  [[integratedSkills]]
+  name = "react-vite"
+  version = "1.0.0"
+
+  [[services]]
+  name = "web"
+  paths = [ "/sound-assistant/" ]
+  localPort = 25005
+
+  [services.development]
+  run = "pnpm --filter @workspace/sound-assistant run dev"
+
+  [services.production]
+  build = [ "pnpm", "--filter", "@workspace/sound-assistant", "run", "build" ]
+  publicDir = "artifacts/sound-assistant/dist/public"
+  serve = "static"
+
+  [[services.production.rewrites]]
+  from = "/*"
+  to = "/index.html"
+
+  [services.env]
+  PORT = "25005"
+  BASE_PATH = "/sound-assistant/"
+  

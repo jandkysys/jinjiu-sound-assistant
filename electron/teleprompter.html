@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline';" />
+  <title>悬浮提词器</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      overflow: hidden;
+      font-family: "KaiTi", "楷体", "FangSong", "仿宋", "STKaiti", serif;
+      color: #fff;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ── 控制栏 ─────────────────────────────────────────────────── */
+    #ctrl-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px;
+      background: rgba(18, 14, 10, 0.88);
+      backdrop-filter: blur(10px);
+      -webkit-app-region: drag;
+      z-index: 200;
+      transition: opacity 0.3s, transform 0.3s;
+      border-bottom: 1px solid rgba(255,200,80,0.18);
+    }
+
+    #ctrl-bar.hidden {
+      opacity: 0;
+      transform: translateY(-100%);
+      pointer-events: none;
+    }
+
+    #ctrl-bar .sep {
+      width: 1px; height: 18px;
+      background: rgba(255,255,255,0.15);
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+    }
+
+    /* ── 按钮 ─────────────────────────────────────────────────── */
+    .btn {
+      -webkit-app-region: no-drag;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 26px;
+      padding: 0 6px;
+      border-radius: 5px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.85);
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+    .btn:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.25); }
+    .btn:active { background: rgba(255,255,255,0.22); transform: scale(0.96); }
+    .btn.primary { background: rgba(255,160,30,0.22); border-color: rgba(255,180,60,0.45); color: #FFD060; }
+    .btn.primary:hover { background: rgba(255,160,30,0.35); }
+    .btn.active { background: rgba(80,200,100,0.22); border-color: rgba(80,220,120,0.45); color: #60E880; }
+    .btn.active:hover { background: rgba(80,200,100,0.35); }
+    .btn.danger { background: rgba(220,60,60,0.18); border-color: rgba(220,60,60,0.35); color: #FF8080; }
+    .btn.danger:hover { background: rgba(220,60,60,0.30); }
+
+    /* ── 速度/字号显示 ────────────────────────────────────────── */
+    .val-label {
+      -webkit-app-region: no-drag;
+      font-size: 11px;
+      min-width: 36px;
+      text-align: center;
+      color: rgba(255,220,100,0.9);
+      font-family: "Consolas", "Menlo", monospace;
+    }
+
+    /* ── 透明度滑块 ──────────────────────────────────────────── */
+    #opacity-slider {
+      -webkit-app-region: no-drag;
+      width: 64px;
+      height: 3px;
+      accent-color: #FFD060;
+      cursor: pointer;
+    }
+
+    /* ── 弹簧间距 ────────────────────────────────────────────── */
+    .spacer { flex: 1; -webkit-app-region: drag; }
+
+    /* ── 防采集 / 穿透状态角标 ──────────────────────────────── */
+    #status-bar {
+      position: fixed;
+      top: 42px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      z-index: 150;
+      pointer-events: none;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: "Microsoft YaHei UI", sans-serif;
+      opacity: 0.75;
+    }
+
+    .badge.protection { background: rgba(60,160,80,0.75); color: #fff; }
+    .badge.passthrough { background: rgba(80,120,220,0.75); color: #fff; }
+
+    /* ── 脚本区域 ────────────────────────────────────────────── */
+    #script-wrap {
+      position: fixed;
+      top: 40px; left: 0; right: 0; bottom: 0;
+      overflow: hidden;
+    }
+
+    /* 导引线（当前阅读位置） */
+    #guide-line {
+      position: absolute;
+      left: 12px; right: 12px;
+      top: 35%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(255,210,60,0.6), transparent);
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* 脚本内容容器 */
+    #content {
+      position: absolute;
+      left: 0; right: 0;
+      top: 0;
+      padding: 0 24px;
+      will-change: transform;
+    }
+
+    .tp-line {
+      display: block;
+      line-height: 1.65;
+      transition: color 0.3s, opacity 0.3s;
+      padding: 2px 0;
+    }
+
+    .tp-line.empty { height: 0.6em; }
+
+    .tp-line.upcoming {
+      color: rgba(255, 255, 255, 0.95);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4);
+    }
+
+    .tp-line.current {
+      color: #FFD060;
+      text-shadow: 0 0 20px rgba(255,200,40,0.5), 0 2px 12px rgba(0,0,0,0.7);
+    }
+
+    .tp-line.read {
+      color: rgba(255, 255, 255, 0.22);
+      text-shadow: none;
+    }
+
+    /* ── 空脚本提示 ─────────────────────────────────────────── */
+    #empty-hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    #empty-hint .icon { font-size: 32px; opacity: 0.4; }
+    #empty-hint .text {
+      font-size: 14px;
+      opacity: 0.4;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+
+    /* ── 穿透模式遮罩（仅显示穿透指示） ──────────────────────── */
+    #passthrough-indicator {
+      position: fixed;
+      bottom: 8px; right: 8px;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(80,120,220,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      z-index: 300;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+
+    #passthrough-indicator.show { display: flex; }
+
+    /* ── 无脚本时提示 ────────────────────────────────────────── */
+    #ctrl-toggle {
+      position: fixed;
+      top: 0; right: 0;
+      width: 32px; height: 32px;
+      background: rgba(18,14,10,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      cursor: pointer;
+      z-index: 300;
+      -webkit-app-region: no-drag;
+      border-radius: 0 0 0 8px;
+    }
+
+    #ctrl-toggle.hide-mode {
+      top: 4px; right: 4px;
+      border-radius: 50%;
+      width: 24px; height: 24px;
+      font-size: 12px;
+      background: rgba(18,14,10,0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 当控制栏隐藏时的展开触发按钮 -->
+  <div id="ctrl-toggle" title="显示/隐藏控制栏">☰</div>
+
+  <!-- 控制栏 -->
+  <div id="ctrl-bar">
+    <!-- 播放控制 -->
+    <button class="btn primary" id="btn-playpause" title="播放/暂停 (Space)">▶</button>
+    <button class="btn" id="btn-prev" title="上一句 (↑)">⬆</button>
+    <button class="btn" id="btn-next" title="下一句 (↓)">⬇</button>
+
+    <div class="sep"></div>
+
+    <!-- 滚动速度 -->
+    <button class="btn" id="btn-speed-dn" title="减速">－</button>
+    <span class="val-label" id="speed-val">1.0×</span>
+    <button class="btn" id="btn-speed-up" title="加速">＋</button>
+
+    <div class="sep"></div>
+
+    <!-- 字号 -->
+    <button class="btn" id="btn-size-dn" title="缩小字号">A－</button>
+    <span class="val-label" id="size-val">32</span>
+    <button class="btn" id="btn-size-up" title="放大字号">A＋</button>
+
+    <div class="sep"></div>
+
+    <!-- 透明度 -->
+    <span style="font-size:10px;color:rgba(255,255,255,0.45);-webkit-app-region:no-drag;">α</span>
+    <input type="range" id="opacity-slider" min="10" max="100" value="92" title="窗口透明度" />
+
+    <div class="spacer"></div>
+
+    <!-- 防采集 -->
+    <button class="btn" id="btn-protection" title="防OBS采集 (Ctrl+Alt+G)">🔒防采集</button>
+
+    <!-- 穿透模式 -->
+    <button class="btn" id="btn-passthrough" title="鼠标穿透模式 (Ctrl+Alt+P)">👻穿透</button>
+
+    <!-- 移到副屏 -->
+    <button class="btn" id="btn-screen" title="移至下一个显示器">⊞副屏</button>
+
+    <div class="sep"></div>
+
+    <!-- 隐藏控制栏 -->
+    <button class="btn" id="btn-hide-ctrl" title="隐藏控制栏">▲</button>
+
+    <!-- 关闭 -->
+    <button class="btn danger" id="btn-close" title="关闭提词器 (Ctrl+Alt+H)">✕</button>
+  </div>
+
+  <!-- 状态角标 -->
+  <div id="status-bar">
+    <span class="badge protection" id="badge-protection" style="display:none">防采集</span>
+    <span class="badge passthrough" id="badge-passthrough" style="display:none">穿透中</span>
+  </div>
+
+  <!-- 导引线 + 脚本区域 -->
+  <div id="script-wrap">
+    <div id="guide-line"></div>
+
+    <div id="content"></div>
+
+    <!-- 空脚本提示 -->
+    <div id="empty-hint">
+      <div class="icon">📜</div>
+      <div class="text">在主窗口「悬浮提词」面板输入台词，然后点击「开启悬浮提词』</div>
+    </div>
+  </div>
+
+  <!-- 穿透模式圆点（点击退出穿透）-->
+  <div id="passthrough-indicator" title="点击退出穿透模式">👁</div>
+
+  <script>
+    "use strict";
+
+    // ── 状态 ───────────────────────────────────────────────────────────────
+
+    let scriptLines = [];    // string[]
+    let fontSize    = 32;    // px
+    let speed       = 1.0;   // 相对速度（1.0 = 基础速度）
+    let opacity     = 0.92;  // 窗口透明度
+    let protection  = false;
+    let passthrough = false;
+    let playing     = false;
+
+    const BASE_PX_PER_SEC = 40;  // speed=1.0 时每秒滚动像素
+
+    let scrollPos    = 0;    // 当前滚动偏移（px，越大内容越靠上）
+    let maxScroll    = 0;    // 最大滚动量
+    let lineData     = [];   // { el, topOffset, height }[]
+    let lastTs       = null;
+    let rafId        = null;
+    let guideY       = 0;    // 导引线距 script-wrap 顶部的 px
+    let ctrlHidden   = false;
+
+    const CTRL_H     = 40;
+
+    // ── DOM 引用 ──────────────────────────────────────────────────────────
+
+    const ctrlBar    = document.getElementById("ctrl-bar");
+    const ctrlToggle = document.getElementById("ctrl-toggle");
+    const content    = document.getElementById("content");
+    const guideLine  = document.getElementById("guide-line");
+    const emptyHint  = document.getElementById("empty-hint");
+    const statusBar  = document.getElementById("status-bar");
+    const ptIndicator = document.getElementById("passthrough-indicator");
+
+    const btnPlay    = document.getElementById("btn-playpause");
+    const btnPrev    = document.getElementById("btn-prev");
+    const btnNext    = document.getElementById("btn-next");
+    const btnSpeedDn = document.getElementById("btn-speed-dn");
+    const btnSpeedUp = document.getElementById("btn-speed-up");
+    const speedVal   = document.getElementById("speed-val");
+    const btnSizeDn  = document.getElementById("btn-size-dn");
+    const btnSizeUp  = document.getElementById("btn-size-up");
+    const sizeVal    = document.getElementById("size-val");
+    const opacitySlider = document.getElementById("opacity-slider");
+    const btnProtection = document.getElementById("btn-protection");
+    const btnPassthrough = document.getElementById("btn-passthrough");
+    const btnScreen  = document.getElementById("btn-screen");
+    const btnHideCtrl = document.getElementById("btn-hide-ctrl");
+    const btnClose   = document.getElementById("btn-close");
+    const badgeProtection = document.getElementById("badge-protection");
+    const badgePassthrough = document.getElementById("badge-passthrough");
+
+    // ── 工具函数 ──────────────────────────────────────────────────────────
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function computeGuideY() {
+      const wrapH = document.getElementById("script-wrap").clientHeight;
+      guideY = Math.round(wrapH * 0.35);
+      guideLine.style.top = guideY + "px";
+    }
+
+    // ── 脚本渲染 ──────────────────────────────────────────────────────────
+
+    function renderScript() {
+      content.innerHTML = "";
+      lineData = [];
+
+      if (scriptLines.length === 0) {
+        emptyHint.style.display = "flex";
+        return;
+      }
+      emptyHint.style.display = "none";
+
+      scriptLines.forEach((text, i) => {
+        const div = document.createElement("div");
+        div.className = "tp-line upcoming" + (text.trim() === "" ? " empty" : "");
+        div.style.fontSize = fontSize + "px";
+        div.dataset.idx = i;
+        div.textContent = text;
+        content.appendChild(div);
+      });
+
+      // 尾部 spacer：让最后一行可以滚动到 guide 位置
+      const spacer = document.createElement("div");
+      spacer.id = "spacer-end";
+      content.appendChild(spacer);
+
+      // 初始位置：内容从 guideY 位置开始
+      scrollPos = 0;
+      applyScroll();
+
+      // 等一帧后计算行高
+      requestAnimationFrame(() => {
+        recomputeLineData();
+        updateSpacerEnd();
+        updateLineClasses();
+      });
+    }
+
+    function recomputeLineData() {
+      lineData = [];
+      let offset = 0;
+      const els = content.querySelectorAll(".tp-line");
+      els.forEach((el) => {
+        const h = el.offsetHeight;
+        lineData.push({ el, topOffset: offset, height: h });
+        offset += h;
+      });
+      const totalContent = offset;
+      const wrapH = document.getElementById("script-wrap").clientHeight;
+      maxScroll = Math.max(0, guideY + totalContent - (wrapH - guideY));
+    }
+
+    function updateSpacerEnd() {
+      const spacer = document.getElementById("spacer-end");
+      if (!spacer) return;
+      const wrapH = document.getElementById("script-wrap").clientHeight;
+      const afterGuide = wrapH - guideY;
+      spacer.style.height = Math.max(0, afterGuide) + "px";
+    }
+
+    // ── 滚动与行样式更新 ─────────────────────────────────────────────────
+
+    function applyScroll() {
+      // content 的 top = guideY - scrollPos (初始时第一行在 guideY 处)
+      content.style.transform = `translateY(${guideY - scrollPos}px)`;
+    }
+
+    function updateLineClasses() {
+      lineData.forEach(({ el, topOffset, height }) => {
+        const lineTop = guideY - scrollPos + topOffset;
+        const lineBottom = lineTop + height;
+        const lineMid = lineTop + height / 2;
+
+        if (lineBottom <= guideY) {
+          el.className = el.className.replace(/\b(upcoming|current|read)\b/g, "").trim() + " read";
+        } else if (lineMid <= guideY + height * 0.3 && lineTop < guideY + height * 0.5) {
+          el.className = el.className.replace(/\b(upcoming|current|read)\b/g, "").trim() + " current";
+        } else {
+          el.className = el.className.replace(/\b(upcoming|current|read)\b/g, "").trim() + " upcoming";
+        }
+      });
+    }
+
+    // ── 自动滚动 rAF 循环 ─────────────────────────────────────────────────
+
+    function tick(ts) {
+      if (!playing) { rafId = null; return; }
+      if (lastTs !== null) {
+        const dt = (ts - lastTs) / 1000;  // 秒
+        scrollPos += BASE_PX_PER_SEC * speed * dt;
+        scrollPos = clamp(scrollPos, 0, maxScroll);
+        applyScroll();
+        updateLineClasses();
+        if (scrollPos >= maxScroll) {
+          playing = false;
+          updatePlayBtn();
+        }
+      }
+      lastTs = ts;
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function startPlay() {
+      if (scriptLines.length === 0) return;
+      playing = true;
+      lastTs = null;
+      if (!rafId) rafId = requestAnimationFrame(tick);
+      updatePlayBtn();
+    }
+
+    function pausePlay() {
+      playing = false;
+      lastTs = null;
+      rafId = null;
+      updatePlayBtn();
+    }
+
+    function togglePlay() {
+      if (playing) pausePlay(); else startPlay();
+    }
+
+    function updatePlayBtn() {
+      btnPlay.textContent = playing ? "⏸" : "▶";
+      btnPlay.className = playing ? "btn active" : "btn primary";
+    }
+
+    // ── 句子跳转 ──────────────────────────────────────────────────────────
+
+    function findCurrentLineIdx() {
+      let best = 0, bestDist = Infinity;
+      lineData.forEach(({ topOffset, height }, i) => {
+        const lineTop = guideY - scrollPos + topOffset;
+        const lineBottom = lineTop + height;
+        const dist = Math.abs((lineTop + lineBottom) / 2 - guideY);
+        if (dist < bestDist) { bestDist = dist; best = i; }
+      });
+      return best;
+    }
+
+    function jumpToLine(idx) {
+      idx = clamp(idx, 0, lineData.length - 1);
+      if (!lineData[idx]) return;
+      // 将 idx 行置于 guide 位置
+      scrollPos = lineData[idx].topOffset;
+      scrollPos = clamp(scrollPos, 0, maxScroll);
+      applyScroll();
+      updateLineClasses();
+    }
+
+    function prevLine() {
+      const cur = findCurrentLineIdx();
+      jumpToLine(cur - 1);
+    }
+
+    function nextLine() {
+      const cur = findCurrentLineIdx();
+      jumpToLine(cur + 1);
+    }
+
+    // ── 设置应用 ──────────────────────────────────────────────────────────
+
+    function applyFontSize(sz) {
+      fontSize = clamp(sz, 16, 72);
+      sizeVal.textContent = fontSize;
+      content.querySelectorAll(".tp-line").forEach(el => {
+        el.style.fontSize = fontSize + "px";
+      });
+      // 重新计算行高
+      requestAnimationFrame(() => {
+        recomputeLineData();
+        updateSpacerEnd();
+        updateLineClasses();
+      });
+    }
+
+    function applySpeed(sp) {
+      speed = clamp(Math.round(sp * 10) / 10, 0.1, 5.0);
+      speedVal.textContent = speed.toFixed(1) + "×";
+    }
+
+    function applyOpacity(val) {
+      opacity = clamp(val, 0.1, 1.0);
+      opacitySlider.value = Math.round(opacity * 100);
+      if (window.tpAPI) window.tpAPI.setOpacity(opacity);
+    }
+
+    function applyProtection(on) {
+      protection = on;
+      btnProtection.className = on ? "btn active" : "btn";
+      badgeProtection.style.display = on ? "inline-block" : "none";
+    }
+
+    function applyPassthrough(on) {
+      passthrough = on;
+      btnPassthrough.className = on ? "btn active" : "btn";
+      badgePassthrough.style.display = on ? "inline-block" : "none";
+      ptIndicator.className = on ? "show" : "";
+      // 穿透模式时自动隐藏控制栏
+      if (on) setCtrlHidden(true);
+    }
+
+    function setCtrlHidden(hide) {
+      ctrlHidden = hide;
+      if (hide) {
+        ctrlBar.classList.add("hidden");
+        ctrlToggle.style.display = "flex";
+        ctrlToggle.className = "hide-mode";
+        btnHideCtrl.textContent = "▼";
+      } else {
+        ctrlBar.classList.remove("hidden");
+        ctrlToggle.style.display = "none";
+        ctrlToggle.className = "";
+        btnHideCtrl.textContent = "▲";
+      }
+    }
+
+    function saveCurrentSettings() {
+      if (!window.tpAPI) return;
+      window.tpAPI.saveData({
+        script: scriptLines.join("\n"),
+        fontSize,
+        speed,
+        opacity,
+        protection,
+        passthrough,
+      });
+    }
+
+    // ── 初始化：从主进程读取数据 ─────────────────────────────────────────
+
+    async function init() {
+      computeGuideY();
+
+      if (!window.tpAPI) {
+        // 预览/开发模式（没有 Electron）
+        scriptLines = ["这是测试台词第一行", "测试台词第二行，请继续", "第三行文字显示中…"];
+        renderScript();
+        return;
+      }
+
+      const data = await window.tpAPI.getData().catch(() => null);
+      if (data) {
+        applyFontSize(data.fontSize ?? 32);
+        applySpeed(data.speed ?? 1.0);
+        opacity = data.opacity ?? 0.92;
+        opacitySlider.value = Math.round(opacity * 100);
+        applyProtection(data.protection ?? false);
+        applyPassthrough(data.passthrough ?? false);
+        const script = data.script ?? "";
+        scriptLines = script.split("\n");
+        renderScript();
+      }
+
+      // 监听主进程推送的数据变化（主窗口更新了脚本）
+      window.tpAPI.onDataChanged((data) => {
+        if (data.script !== undefined) {
+          scriptLines = data.script.split("\n");
+          renderScript();
+        }
+        if (data.fontSize !== undefined) applyFontSize(data.fontSize);
+        if (data.speed !== undefined) applySpeed(data.speed);
+        if (data.opacity !== undefined) {
+          opacity = data.opacity;
+          opacitySlider.value = Math.round(opacity * 100);
+        }
+        if (data.protection !== undefined) applyProtection(data.protection);
+        if (data.passthrough !== undefined) applyPassthrough(data.passthrough);
+      });
+
+      // 监听来自主进程的快捷键命令
+      window.tpAPI.onCommand(async (cmd) => {
+        switch (cmd) {
+          case "play":            startPlay();         break;
+          case "pause":           pausePlay();         break;
+          case "toggle":          togglePlay();        break;
+          case "prev":            prevLine();          break;
+          case "next":            nextLine();          break;
+          case "hide":            window.tpAPI.close(); break;
+          case "passthrough-on":  applyPassthrough(true);  break;
+          case "passthrough-off": applyPassthrough(false); break;
+          case "protection-on":   applyProtection(true);   break;
+          case "protection-off":  applyProtection(false);  break;
+        }
+      });
+    }
+
+    // ── 按钮事件绑定 ──────────────────────────────────────────────────────
+
+    btnPlay.addEventListener("click", togglePlay);
+    btnPrev.addEventListener("click", prevLine);
+    btnNext.addEventListener("click", nextLine);
+
+    btnSpeedDn.addEventListener("click", () => { applySpeed(speed - 0.1); saveCurrentSettings(); });
+    btnSpeedUp.addEventListener("click", () => { applySpeed(speed + 0.1); saveCurrentSettings(); });
+    btnSizeDn.addEventListener("click",  () => { applyFontSize(fontSize - 2); saveCurrentSettings(); });
+    btnSizeUp.addEventListener("click",  () => { applyFontSize(fontSize + 2); saveCurrentSettings(); });
+
+    opacitySlider.addEventListener("input", () => {
+      opacity = opacitySlider.value / 100;
+      if (window.tpAPI) window.tpAPI.setOpacity(opacity);
+    });
+    opacitySlider.addEventListener("change", () => saveCurrentSettings());
+
+    btnProtection.addEventListener("click", async () => {
+      const next = !protection;
+      applyProtection(next);
+      if (window.tpAPI) await window.tpAPI.setProtection(next);
+      saveCurrentSettings();
+    });
+
+    btnPassthrough.addEventListener("click", async () => {
+      const next = !passthrough;
+      applyPassthrough(next);
+      if (window.tpAPI) await window.tpAPI.setPassthrough(next);
+      saveCurrentSettings();
+    });
+
+    // 穿透圆点点击→退出穿透
+    ptIndicator.addEventListener("click", async () => {
+      applyPassthrough(false);
+      if (window.tpAPI) await window.tpAPI.setPassthrough(false);
+      saveCurrentSettings();
+    });
+
+    btnScreen.addEventListener("click", () => {
+      if (window.tpAPI) window.tpAPI.moveToScreen();
+    });
+
+    btnHideCtrl.addEventListener("click", () => setCtrlHidden(!ctrlHidden));
+    ctrlToggle.addEventListener("click", () => setCtrlHidden(false));
+
+    btnClose.addEventListener("click", () => {
+      if (window.tpAPI) window.tpAPI.close();
+    });
+
+    // ── 键盘快捷键（窗口内） ──────────────────────────────────────────────
+
+    document.addEventListener("keydown", (e) => {
+      switch (e.code) {
+        case "Space":
+          e.preventDefault();
+          togglePlay();
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          prevLine();
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          nextLine();
+          break;
+        case "Equal": case "NumpadAdd":
+          e.preventDefault();
+          applySpeed(speed + 0.1);
+          saveCurrentSettings();
+          break;
+        case "Minus": case "NumpadSubtract":
+          e.preventDefault();
+          applySpeed(speed - 0.1);
+          saveCurrentSettings();
+          break;
+        case "BracketLeft":
+          e.preventDefault();
+          applyFontSize(fontSize - 2);
+          saveCurrentSettings();
+          break;
+        case "BracketRight":
+          e.preventDefault();
+          applyFontSize(fontSize + 2);
+          saveCurrentSettings();
+          break;
+      }
+    });
+
+    // ── 窗口 resize 适配 ──────────────────────────────────────────────────
+
+    window.addEventListener("resize", () => {
+      computeGuideY();
+      updateSpacerEnd();
+      recomputeLineData();
+      applyScroll();
+      updateLineClasses();
+    });
+
+    // ── 启动 ─────────────────────────────────────────────────────────────
+
+    init();
+  </script>
+</body>
+</html>

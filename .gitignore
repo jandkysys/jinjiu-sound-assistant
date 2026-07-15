@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Generated builds and installers
+dist/
+release/
+
+# Local Git worktrees
+.worktrees/
+
+# Generated caches and logs
+.tsbuildinfo
+*.log
+.DS_Store
+
+# Local environment overrides
+.env
+.env.local
+.env.*.local

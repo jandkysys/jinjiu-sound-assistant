@@ -1,0 +1,53 @@
+appId: com.xjt.sound-assistant
+productName: 金玖音效助手
+copyright: © 2026 金玖音效助手
+asar: false
+
+files:
+  - dist/electron/**/*
+  - electron/main.js
+  - electron/preload.js
+  - electron/preload-audio.js
+  - electron/preload-float.js
+  - electron/preload-teleprompter.js
+  - electron/float.html
+  - electron/teleprompter.html
+  - electron/resources/**/*
+  - package.json
+
+directories:
+  output: release
+  buildResources: electron/resources
+
+win:
+  artifactName: Jinjiu-Sound-Assistant-Setup-${version}.${ext}
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/resources/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerLanguages:
+    - zh_CN
+  language: 2052
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 金玖音效助手
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: electron/resources/icon.png
+  category: public.app-category.music
+
+dmg:
+  title: 金玖音效助手
+  artifactName: ${productName}.${ext}
+
+publish: null
